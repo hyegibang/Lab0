@@ -93,7 +93,37 @@ class Division:
 
         saturated_edges = {}
 
-        #TODO: implement this
+        self.G.add_node('S')
+
+        currwin = self.teams[teamID].wins+self.teams[teamID].remaining
+
+        RHS = list(self.get_team_IDs())
+        RHS.remove(teamID)
+        for currteam in RHS:
+            team = self.teams[currteam]
+            needwin = team.wins
+            self.G.add_node(team.ID)
+            self.G.add_edge(team.ID, 'T', capacity= currwin-needwin, flow= 0 )
+
+
+        allmatches = []
+
+        for i in range(0, len(self.teams)):
+            teamA = i
+            for j in range(i, len(self.teams)):
+                teamB = j
+                allmatches.append((teamA, teamB))
+
+        for match in allmatches:
+            teamC, teamD = match
+            game_remain = self.teams[teamC].get_against(teamD)
+            saturated_edges[match] = game_remain
+            self.G.add_node(match)
+            self.G.add_edge('S', match, capacity=game_remain, flow= 0 )
+            for matchedTeam in match:
+                self.G.add_edge(match, matchedTeam, capacity=float("infinity"), flow=0)
+
+        self.G.add_node('T')
 
         return saturated_edges
 
@@ -108,7 +138,13 @@ class Division:
         return: True if team is eliminated, False otherwise
         '''
 
-        #TODO: implement this
+        flow_val, flow_dict = nx.maximum_flow(self.G, 'S', 'T')
+
+
+        for key in saturated_edges:
+            currFlow=flow_dict['S'][key]
+            if saturated_edges[key] != currFlow:
+                return True
 
         return False
 
@@ -126,10 +162,42 @@ class Division:
 
         maxflow=pic.Problem()
 
-        #TODO: implement this
+        f={}
+        for edge in self.G.edges():
+            constriant = self.G[edge[0]][edge[1]]['capacity']
+            if(constriant < sys.maxsize):
+                f[edge]=maxflow.add_variable('f[{0}]'.format(edge),1, lower=0, upper=self.G[edge[0]][edge[1]]['capacity'])
+            else:
+                f[edge]=maxflow.add_variable('f[{0}]'.format(edge),1, lower=0)
 
+        #total flow
+        F =maxflow.add_variable('F',1)
+
+        s = 'S'
+        t = 'T'
+
+        for i in self.G.nodes:
+            if i == s: # set source flow
+                maxflow.add_constraint(
+                    pic.sum([f[p,i] for p in self.G.predecessors(i)],'p','pred(i)') + F
+                    == pic.sum([f[i,j] for j in self.G.successors(i)],'j','succ(i)'))
+            elif i != t: # conservation of flow
+                maxflow.add_constraint(
+                    pic.sum([f[p,i] for p in self.G.predecessors(i)],'p','pred(i)')
+                        == pic.sum([f[i,j] for j in self.G.successors(i)],'j','succ(i)'))
+
+        # Set the objective.
+        maxflow.set_objective('max',F)
+        # Solve the problem.
+        maxflow.solve(verbose=0,solver='cvxopt')
+
+        # edge to flow
+        flow = pic.tools.eval_dict(f)
+        for edge in self.G.edges('S'):
+            u, v = edge
+            if not abs(flow[u,v]- self.G.edges[u, v]['capacity']) < 1e-7:
+                return True
         return False
-
 
     def checkTeam(self, team):
         '''Checks that the team actually exists in this division.
